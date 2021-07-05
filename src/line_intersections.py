@@ -116,3 +116,4 @@ point_df['lines']=point_df['lines'].apply(unpack_lists)
 
 #!DONE 
 #now write into a CSV 
+point_df.to_csv(data_nonraw/'intersection_points.csv')
