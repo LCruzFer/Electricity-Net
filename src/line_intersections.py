@@ -10,6 +10,7 @@ from shapely.geometry import Point, MultiPoint, LineString, MultiLineString, poi
 wd=Path.cwd()
 data_lines=wd.parent/'data'/'Lines'
 data_fieldwork=wd.parent/'data'/'Kakamega Fieldwork Shapefiles'
+data_nonraw=wd.parent/'data'/'transformed_data'
 
 '''
 This file is used to find the intersection points of lines in an electricity network giving each point an ID and line on which they are. One point that is intersection of multiple lines will have ID|geom|(lines it lies on). 
@@ -98,7 +99,7 @@ intersections=all_intersections(lines)
 #then turn into a dataframe
 intersections_df=pd.DataFrame.from_dict(intersections, orient='index').rename(columns={0: 'geometry'})
 '''
-Intersections df now contains the geometry of an intersection of 3 lines twice, one row for each pair of lines intersecting in this point. Now get a df with point|lines this point lies on, where point=intersection, and assign an id to each intersection.
+Intersections df now contains the geometry of an intersection of 3 lines twice, one row for each pair of lines intersecting in this point. Now get a df with point|(lines this point lies on), where point=intersection, and assign an id to each intersection.
 '''
 #make a copy of the intersections df that can be transformed 
 point_df=intersections_df.copy()
@@ -112,3 +113,6 @@ point_df['lines']=point_df['lines'].apply(tuple_to_list)
 point_df=point_df.groupby(['p_id', 'geometry']).agg(lambda x: x.tolist())
 #unpack list of lists that is now lines column
 point_df['lines']=point_df['lines'].apply(unpack_lists)
+
+#!DONE 
+#now write into a CSV 
