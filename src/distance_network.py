@@ -15,3 +15,20 @@ This file uses the line intersections (output from line_intersections), closest 
 #*#########################
 #! DATA
 #*#########################
+#!for now household and line data only a subset (around transformer 8459) of treatment households
+#household data 
+units=pd.read_csv(data_transformed/'closest_points_on_lines.csv')
+units['closest_point']=units['closest_point'].apply(wkt.loads)
+units=units.drop('Unnamed: 0', axis=1)
+#intersection points 
+intersections=pd.read_csv(data_transformed/'intersection_points.csv')
+intersections['geometry']=intersections['geometry'].apply(wkt.loads)
+#transformer
+transformers=pd.read_csv(data_transformed/'transformer_closest_linepoints.csv')
+transformers=transformers.drop('Unnamed: 0', axis=1)
+transformers['closest_point']=transformers['closest_point'].apply(wkt.loads)
+#only keep id, line and closest point on line
+transformers=transformers[['Trans_No', 'Line_ID', 'closest_point']]
+#!filter this for transformer 8459 
+transformer=transformers[transformers['Trans_No']==8459].reset_index(drop=True)
+
