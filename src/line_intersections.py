@@ -8,6 +8,7 @@ from shapely.geometry import Point, MultiPoint, LineString, MultiLineString, poi
 
 #*set path 
 wd=Path.cwd()
+data_transformed=wd.parent/'data'/'transformed_data'
 data_lines=wd.parent/'data'/'Lines'
 data_fieldwork=wd.parent/'data'/'Kakamega Fieldwork Shapefiles'
 
@@ -112,3 +113,6 @@ point_df['lines']=point_df['lines'].apply(tuple_to_list)
 point_df=point_df.groupby(['p_id', 'geometry']).agg(lambda x: x.tolist())
 #unpack list of lists that is now lines column
 point_df['lines']=point_df['lines'].apply(unpack_lists)
+
+#write to csv 
+point_df.to_csv(data_transformed/'line_intersections.csv')
