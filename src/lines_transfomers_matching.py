@@ -6,6 +6,7 @@ import nearest_neighbor_tools as nnt
 
 #*set path 
 wd=Path.cwd()
+data_transformed=wd.parent/'data'/'transformed_data'
 data_lines=wd.parent/'data'/'Lines'
 data_fieldwork=wd.parent/'data'/'Kakamega Fieldwork Shapefiles'
 
@@ -23,7 +24,7 @@ transformers['Trans_No']=transformers['Trans_No'].astype(int)
 transformers['geometry']=[ops.transform(nnt._to_2d, line) for line in transformers['geometry']]
 
 #*#########################
-#! Line Identifier
+#! LINE IDENTIFIER
 #*#########################
 '''
 The lines dataset does not contain any information on the transformer the lines belong to. Therefore, match them based on the following approach: 
@@ -31,6 +32,7 @@ The lines dataset does not contain any information on the transformer the lines 
 - get distance from centre of line to each transformer
 - assign transformer number to line where dist(line, transformer) is minimum distance
 '''
+#! this is not perfect yet as this nnt.closest() simply uses center points of lines for matching purposes; it should be fine for the raw matching but isn't perfect obviously
 #get centre of each line
 lines['point']=[line.interpolate(0.5, normalized=True) for line in lines['geometry']]
 #get transformer point and number
@@ -51,3 +53,22 @@ lines_w_transnos=lines[['Line_ID', 'geometry', 'point']].merge(nearest_one_df, o
 
 #write to a csv 
 lines_w_transnos.to_csv(data_lines/'lines_w_transformernos.csv')
+
+#*#########################
+#! CLOSEST POINT ON LINE
+#*#########################
+#find the closest point to the transformer on the line that is closest to it
+#use the prior results
+#first only keep relevant columns of lines_w_transnos df 
+trans_closest_line=lines_w_transnos[['Trans_No', 'Trans_Location', 'Line_ID', 'geometry']]
+#for each (transformer, line) pair find the nearest point on the line from the transformer
+#!make more pythonic once more internet access
+trans_closest_line['closest_point']=0
+for i in trans_closest_line.index:
+    trans_geom=trans_closest_line.loc[i, 'Trans_Location']
+    line_geom=trans_closest_line.loc[i, 'geometry']
+    closest_point=ops.nearest_points(trans_geom, line_geom)[1]
+    trans_closest_line.loc[i, 'closest_point']=closest_point
+
+#write to csv 
+trans_closest_line.to_csv(data_transformed/'transformer_closest_linepoints.csv')
