@@ -23,6 +23,10 @@ units=units.drop('Unnamed: 0', axis=1)
 #intersection points 
 intersections=pd.read_csv(data_transformed/'intersection_points.csv')
 intersections['geometry']=intersections['geometry'].apply(wkt.loads)
+intersections=intersections.drop('Unnamed: 0', axis=1)
+#read in line_id|(p_ids of points on line) df 
+lineid_pid=pd.read_csv(data_transformed/'line_intersection_points.csv')
+lineid_pid=lineid_pid.drop('Unnamed: 0', axis=1)
 #transformer
 transformers=pd.read_csv(data_transformed/'transformer_closest_linepoints.csv')
 transformers=transformers.drop('Unnamed: 0', axis=1)
