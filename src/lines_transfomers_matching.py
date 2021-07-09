@@ -69,6 +69,20 @@ for i in trans_closest_line.index:
     line_geom=trans_closest_line.loc[i, 'geometry']
     closest_point=ops.nearest_points(trans_geom, line_geom)[1]
     trans_closest_line.loc[i, 'closest_point']=closest_point
+#create df with Trans_No and line and corresponding point that are closest to Trans_No, i.e. shortest distance between Trans_Location and closest_point
+trans_closest_line['distance']=[tl.distance(cp) for tl, cp in zip(trans_closest_line['Trans_Location'], trans_closest_line['closest_point'])]
+#for each trans_no find line_id with shortest distance 
+transnos=trans_closest_line['Trans_No'].drop_duplicates()
+shortest_dist={}
+for tn in transnos: 
+    trans=trans_closest_line[trans_closest_line['Trans_No']==tn]
+    closest=trans[trans['distance']==trans['distance'].min()].index
+    shortest_dist[tn]=trans.loc[closest, 'Line_ID'].values
 
+#!!WARNING: multiple lines are closest to one transformer, for now simply using first one in list which will result in longer distances fro some points !!! (probably only a slgith difference)
+trans_shortest=pd.DataFrame.from_dict(shortest_dist, orient='index').reset_index()
+trans_shortest=trans_shortest.rename(columns={'index': 'Trans_No', 0: 'Line_ID'}).drop([1, 2], axis=1)
+trans_shortest=trans_shortest.merge(trans_closest_line[['Line_ID', 'closest_point']], on='Line_ID')
 #write to csv 
 trans_closest_line.to_csv(data_transformed/'transformer_closest_linepoints.csv')
+trans_shortest.to_csv(data_transformed/'transformer_closest_line.csv')
