@@ -76,4 +76,6 @@ def distances_on_line(lines, units, intersections, transformer):
         line=5320
         #first need to retrieve all points that are on this line
         unit_points=units[units['lines']==line]
-        
+
+def additive(a, b):
+    return a+b
