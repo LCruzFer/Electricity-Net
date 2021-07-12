@@ -8,6 +8,7 @@ from shapely.geometry import Point, MultiPoint, LineString, MultiLineString, poi
 
 #*set path 
 wd=Path.cwd()
+data_transformed=wd.parent/'data'/'transformed_data'
 data_lines=wd.parent/'data'/'Lines'
 data_fieldwork=wd.parent/'data'/'Kakamega Fieldwork Shapefiles'
 data_transformed=wd.parent/'data'/'transformed_data'
