@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd 
 import geopandas as gpd 
-from shapely import ops
+from shapely import ops, wkt
 import nearest_neighbor_tools as nnt
 
 #*set path 
@@ -14,10 +14,8 @@ data_fieldwork=wd.parent/'data'/'Kakamega Fieldwork Shapefiles'
 #! DATA
 #*#########################
 #lines 
-lines=gpd.read_file(data_lines/'lines_all.shp')
-lines['Line_ID']=101+lines.index
-#drop freature dimension from linestring for matching to transformers to work
-lines['geometry']=[ops.transform(nnt._to_2d, line) for line in lines['geometry']]
+lines=pd.read_csv(data_transformed/'lines_all_split.csv')
+lines['geometry']=lines['geometry'].apply(wkt.loads)
 #transformers
 transformers=gpd.read_file(data_fieldwork/'Final_Transformers.shp')
 transformers['Trans_No']=transformers['Trans_No'].astype(int)
@@ -52,7 +50,7 @@ nearest_one_df=nearest_one_df.rename(columns={'index': 'Line_ID', 0: 'Trans_No',
 lines_w_transnos=lines[['Line_ID', 'geometry', 'point']].merge(nearest_one_df, on='Line_ID', how='left')
 
 #write to a csv 
-lines_w_transnos.to_csv(data_lines/'lines_w_transformernos.csv')
+lines_w_transnos.to_csv(data_transformed/'lines_w_transformernos.csv')
 
 #*#########################
 #! CLOSEST POINT ON LINE
@@ -68,7 +66,8 @@ for i in trans_closest_line.index:
     trans_geom=trans_closest_line.loc[i, 'Trans_Location']
     line_geom=trans_closest_line.loc[i, 'geometry']
     closest_point=ops.nearest_points(trans_geom, line_geom)[1]
-    trans_closest_line.loc[i, 'closest_point']=closest_point
+    trans_closest_line.loc[i, 'closest_point']=closest_point.wkt
+trans_closest_line['closest_point']=trans_closest_line['closest_point'].apply(wkt.loads)
 #create df with Trans_No and line and corresponding point that are closest to Trans_No, i.e. shortest distance between Trans_Location and closest_point
 trans_closest_line['distance']=[tl.distance(cp) for tl, cp in zip(trans_closest_line['Trans_Location'], trans_closest_line['closest_point'])]
 #for each trans_no find line_id with shortest distance 
@@ -78,7 +77,6 @@ for tn in transnos:
     trans=trans_closest_line[trans_closest_line['Trans_No']==tn]
     closest=trans[trans['distance']==trans['distance'].min()].index
     shortest_dist[tn]=trans.loc[closest, 'Line_ID'].values
-
 #!!WARNING: multiple lines are closest to one transformer, for now simply using first one in list which will result in longer distances fro some points !!! (probably only a slgith difference)
 trans_shortest=pd.DataFrame.from_dict(shortest_dist, orient='index').reset_index()
 trans_shortest=trans_shortest.rename(columns={'index': 'Trans_No', 0: 'Line_ID'}).drop([1, 2], axis=1)
