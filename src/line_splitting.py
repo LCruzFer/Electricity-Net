@@ -67,5 +67,3 @@ lines_all=lines_all.rename(columns={"geometry_y":"geometry"})
 
 # export to csv
 lines_all.to_csv(data_transformed/"lines_all_split.csv")
-
-test=pd.read_csv(data_transformed/'lines_all_split.csv')

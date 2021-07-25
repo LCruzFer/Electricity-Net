@@ -104,7 +104,7 @@ lines=pd.read_csv(data_transformed/'lines_w_transformernos.csv')
 lines=lines.drop(['Unnamed: 0', 'Trans_Location', 'point'], axis=1)
 #turn geometry into shapely object from string 
 lines['geometry']=lines['geometry'].apply(wkt.loads)
-lines=lines[lines['Trans_No']==8459]
+#lines=lines[lines['Trans_No']==8459]
 
 #*#########################
 #! INTERSECTIONS

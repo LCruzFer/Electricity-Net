@@ -2,7 +2,6 @@ from pathlib import Path
 import pandas as pd 
 import geopandas as gpd 
 from shapely import ops, wkt
-from shapely.geometry.polygon import LinearRing
 import nearest_neighbor_tools as nnt
 
 
@@ -18,12 +17,6 @@ This file is used to match a household unit to the line of the electricity netwo
 
 #TODO: implement finding the actually closest point on the line, for first step not necessary yet
 #TODO: streamline matching_and_distances class better
-
-#*#########################
-#! FUNCTIONS
-#*#########################
-
-# already defined in nearest_neighbor_tools
 
 #*#########################
 #! DATA
@@ -47,8 +40,9 @@ sub_lines=lines[lines['Trans_No']==8459]
 #! MATCHING
 #*#########################
 #use class matching_and_distances 
-#initialize class with lines and treatment household data 
-treatment_matching=nnt.matching_and_distances(sub_treatment_hh, lines, ('OBJECTID', 'geometry'), ('Line_ID', 'geometry'))
+#initialize class with lines and treatment household data
+# ! before: sub_treatment_hh 
+treatment_matching=nnt.matching_and_distances(treatment_hh, lines, ('OBJECTID', 'geometry'), ('Line_ID', 'geometry'))
 #get dict with indices of {hh id: closest line id}
 treat_closest_lines=treatment_matching.match_dict
 #get distances between the unit and its closest line 

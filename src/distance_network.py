@@ -1,6 +1,6 @@
 from pathlib import Path
-from networkx.algorithms.shortest_paths.generic import shortest_path
 import pandas as pd 
+import geopandas as gpd
 from shapely import ops, wkt 
 import networkx as nx
 from shapely.geometry import Point
@@ -15,7 +15,21 @@ data_lines=wd.parent/'data'/'Lines'
 data_fieldwork=wd.parent/'data'/'Kakamega Fieldwork Shapefiles'
 
 '''
+This file uses a network graph to find the distance from a household to the transformer. First, the distance between points laying on the same line are calculated. Then, a weighted network graph is constructed to find the shortest path. Finally, the distance between a household to the point on line is added.
+
+files used:
+closest_points_on_lines.csv (household)
+intersection_points.csv
+trans_line_closest.csv
+lines_all_split.csv
+Treatment_Households.shp
+
+output: distances.csv
+
+###
 This file uses the line intersections (output from line_intersections), closest points to units on lines (output from lines_households_matching) and closest points to transformers (lines_transformers_matching) to create a networkx Graph with edges between points on same line. These edges have the respective distance as their weight. Then find shortest path between a point with a household id and point with transformer id using Dijkstra alogrithm. 
+
+
 '''
 
 #*#########################
@@ -44,10 +58,12 @@ def str_to_list(df, col):
     df[col]=df[col].apply(lambda x: [int(e) for e in x])
 
     return df
+
+    
 #*#########################
 #! DATA
 #*#########################
-#!for now household and line data only a subset (around transformer 8459) of treatment households
+
 #household data 
 units=pd.read_csv(data_transformed/'closest_points_on_lines.csv')
 units=prep_data(units, ['closest_point'])
@@ -56,20 +72,28 @@ units=units.rename(columns = {units.columns[1]:'geometry'})
 intersections=pd.read_csv(data_transformed/'intersection_points.csv')
 intersections=prep_data(intersections, ['geometry'])
 intersections=str_to_list(intersections,'lines')
+
+'''
 #read in line_id|(p_ids of points on line) df 
 lineid_pid=pd.read_csv(data_transformed/'line_intersection_points.csv')
 lineid_pid=prep_data(lineid_pid, [])
 lineid_pid=str_to_list(lineid_pid, 'p_id')
-#transformer
-transformers=pd.read_csv(data_transformed/'transformer_closest_linepoints.csv')
-transfomers=prep_data(transformers, ['Trans_Location', 'geometry', 'closest_point'])
-#only keep id, line and closest point on line
-transformers=transformers[['Trans_No', 'Line_ID', 'closest_point']]
-#!filter this for transformer 8459 
-transformer=transformers[transformers['Trans_No']==8459].reset_index(drop=True)
 #streamline column names across data 
 lineid_pid=lineid_pid.rename(columns={'line_id': 'lines'})
-transformer=transformer.rename(columns={'Line_ID': 'lines'})
+
+'''
+
+#transformer
+transformers=pd.read_csv(data_transformed/'trans_line_closest.csv')
+transformers=prep_data(transformers, ['closest_point'])
+transformers=transformers.rename(columns={'closest_point':'geometry'})
+
+# lines
+lines=pd.read_csv(data_transformed/'lines_all_split.csv')
+
+#*treatment households
+treatment_hh=gpd.read_file(data_fieldwork/'Treatment_Households.shp')
+
 
 #*#########################
 #! DISTANCES
@@ -77,14 +101,14 @@ transformer=transformer.rename(columns={'Line_ID': 'lines'})
 '''
 In this section the distances between points on the same line are calculated.
 '''
-def distances_on_line(lines, units, intersections, transformer):
+def distances_on_line(lines, units, intersections, transformers):
     '''
     Calculate distance between points on the same line.
     
     *lines=list of lines
     *units=unit df 
     *intersections=intersections df 
-    *transformer=transformer df
+    *transformers=transformers df
 
     returns a df with the line, the corresponding distances of two points on this line, including the geometry of the points
     '''
@@ -97,8 +121,9 @@ def distances_on_line(lines, units, intersections, transformer):
         #first need to retrieve all points that are on this line
         unit_points=units[units['lines']==line]
         intersection_points=intersections[intersections.apply(lambda x: line in x['lines'], axis = 1)]
+        transformer_points=transformers[transformers['lines']==line]
         # combine to one df
-        points_on_line = unit_points.append(intersection_points, ignore_index=True)
+        points_on_line = unit_points.append([intersection_points,transformer_points], ignore_index=True)
         # initialize dictionary with point-tuples as key and distance as value
         line_dist={}
         if len(points_on_line) >= 2:
@@ -124,6 +149,7 @@ def distances_on_line(lines, units, intersections, transformer):
             # retrieve point geometry
             points_distance['geometry_A'] = points_distance.apply(lambda row: points_on_line.loc[points_on_line['p_id'] == row.pointA,'geometry'].reset_index(drop=True)[0], axis=1)
             points_distance['geometry_B'] = points_distance.apply(lambda row: points_on_line.loc[points_on_line['p_id'] ==row.pointB,'geometry'].reset_index(drop=True)[0], axis=1)
+            # add to df
             distances=distances.append(points_distance, ignore_index=True)
         else: 
             # put in nan's if points_on_line has less than 2 entries, because distance can not be calculated
@@ -133,8 +159,10 @@ def distances_on_line(lines, units, intersections, transformer):
 
 
 # use function
-lines=transformer['lines'].drop_duplicates().tolist()
-distances = distances_on_line(lines=lines, units=units, intersections=intersections, transformer=transformer)
+#lines=transformers['lines'].drop_duplicates().tolist()
+lines=lines['Line_ID'].drop_duplicates().tolist()
+distances = distances_on_line(lines=lines, units=units, intersections=intersections, transformers=transformers)
+distances[~(distances.distance.isnull())]
 # lines with nan
 no_distances=distances.line[distances.distance.isnull()].tolist()
 # 220 lines
@@ -160,55 +188,78 @@ for i in range(len(test)):
 nx.draw(G, with_labels= True, font_weight='bold')
 
 
-def dist_ab(G,a,b,df):
+def dist_st(G,s,t, algorithm='bellman-ford'):
     '''
-    find the shortest path between a and b in network and calculate the distance,
-    return df with source, target, and the distance containing one row
+    find the shortest path between s and t in network graph and calculate the distance,
+    return df with source, target, and the distance containing one row and the path as a list of points
+    G: network Graph
+    s: source
+    t: target
+    algorithm: default is bellman-ford, alternative is dijkstra
     '''
     #a = s
     #b = t
     #df = test
     # get path points between source and target, weighted by distance
-    path = nx.shortest_path(G, source=a, target=b, weight='distance')
+    path = nx.shortest_path(G, source=s, target=t, weight='distance', method=algorithm)
     # initialize distance
     d = 0
     # add up distance along path
     for i in range(len(path)):
         if i < len(path)-1: # sonst index out of range
-            # a and b can either be stored in 'pointA' or 'pointB'
-            d += df['distance'][((df['pointA']==path[i]) & (df['pointB']==path[i+1])) | ((df['pointB']==path[i]) & (df['pointA']==path[i+1]))].reset_index(drop=True)[0]
+            d += G.edges[(path[i],path[i+1])]['weight']
     # make df        
-    x = {'source':[a],'target':[b], 'distance':[d]}
+    x = {'source':s,'target':t, 'distance':d, 'path':[path]}
     to_df = pd.DataFrame.from_dict(x)
     return to_df
 
 
-# define source and target lists
+# define source list
 source = units['p_id'].tolist()
-#target = transfomers['Trans_No'].tolist() # need here point id's
 
 # initialize df
-dist = pd.DataFrame(columns=['source', 'target', 'distance']) 
-# use dist_ab to get all distances from source to target in G
+dist = pd.DataFrame(columns=['source', 'target', 'distance', 'path']) 
+# use dist_st to get all distances from source to target in G
 for s in source:
-    t = 598944
-    #for t in target:
+    # extract corresponding transformer number from HH-ID
+    t = treatment_hh[treatment_hh['OBJECTID']==s]['Trans_No'].reset_index(drop=True)[0]
     if (t in G.nodes()) and (s in G.nodes()) and (nx.has_path(G,s,t)):
-        df = dist_ab(G=G, a=s, b=t, df=test)
-        dist.append(df, ignore_index=True)
+        df = dist_st(G=G, s=s, t=t)
+        dist = dist.append(df, ignore_index=True)
 
+#dijkstra=dist
+#sum(dijkstra['distance'] == dist['distance']) # all except one are the same
+len(dist) # 473
+len(source) # 596
 
 '''
-can ignore this, was just for testing before
+missing distances for more than 100 hh
+reason: some lines do not intersect -> see Visualization
 '''
-# test shortets path
-a=test['pointA'][1]
-b=test['pointB'][4]
-y=nx.shortest_path(G, source=a, target=b, weight='distance') # target cant be list
-#length=nx.shortest_path_length(G, source=a, target=b, weight='distance')
 
-# calculate distance
+#*#########################
+#! Distances HH to line
+#*#########################
 
-d = test['distance'][(test['pointB']==y[0]) & (test['pointA']==y[1])].reset_index(drop=True)[0] + test['distance'][(test['pointA']==y[1]) & (test['pointB']==y[2])].reset_index(drop=True)[0]
-x = {'source':a,'target':b, 'distance':d}
-dist.append(x, ignore_index=True)
+# units df contains location of closest points on line from hh
+# treatment_hh contains location of hh 
+# nead to find distance between those 
+
+# new column
+dist['hh_to_line'] = 0
+for i in source:
+    # location of hh
+    hh_loc = treatment_hh[treatment_hh['OBJECTID'] == i]['geometry'].reset_index(drop=True)[0]
+    # location on line
+    p_loc = units[units['p_id']==i]['geometry'].reset_index(drop=True)[0]
+    # distance
+    d = hh_loc.distance(p_loc)
+    # save in df
+    dist.loc[dist['source']==i,'hh_to_line'] = d
+
+# column with total distance from hh to transformer
+dist['total'] = dist['distance']+dist['hh_to_line']  
+
+### could add distance from transformer to line, but should be very small
+
+dist.to_csv(data_transformed/'distances.csv')
