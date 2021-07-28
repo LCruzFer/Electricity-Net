@@ -218,18 +218,31 @@ def dist_st(G,s,t, algorithm='bellman-ford'):
 source = units['p_id'].tolist()
 
 # initialize df
-dist = pd.DataFrame(columns=['source', 'target', 'distance', 'path']) 
+dist_bf = pd.DataFrame(columns=['source', 'target', 'distance', 'path']) 
 # use dist_st to get all distances from source to target in G
 for s in source:
     # extract corresponding transformer number from HH-ID
     t = treatment_hh[treatment_hh['OBJECTID']==s]['Trans_No'].reset_index(drop=True)[0]
     if (t in G.nodes()) and (s in G.nodes()) and (nx.has_path(G,s,t)):
-        df = dist_st(G=G, s=s, t=t)
-        dist = dist.append(df, ignore_index=True)
+        df = dist_st(G=G, s=s, t=t, algorithm = 'bellman-ford')
+        dist_bf = dist_bf.append(df, ignore_index=True)
 
-#dijkstra=dist
-#sum(dijkstra['distance'] == dist['distance']) # all except one are the same
-len(dist) # 473
+# using dijkstra algorithm
+dist_dij = pd.DataFrame(columns=['source', 'target', 'distance', 'path']) 
+# use dist_st to get all distances from source to target in G
+for s in source:
+    # extract corresponding transformer number from HH-ID
+    t = treatment_hh[treatment_hh['OBJECTID']==s]['Trans_No'].reset_index(drop=True)[0]
+    if (t in G.nodes()) and (s in G.nodes()) and (nx.has_path(G,s,t)):
+        df = dist_st(G=G, s=s, t=t, algorithm = 'dijkstra')
+        dist_dij = dist_dij.append(df, ignore_index=True)
+
+# rename and merge
+dist_bf = dist_bf.rename(columns = {'distance':'distance_bf', 'path':'path_bf'})
+dist_dij = dist_dij.rename(columns = {'distance':'distance_dij', 'path':'path_dij'})   
+dist_all = dist_bf.merge(dist_dij, on=['source', 'target'])
+
+len(dist_all) # 473
 len(source) # 596
 
 '''
@@ -246,7 +259,7 @@ reason: some lines do not intersect -> see Visualization
 # nead to find distance between those 
 
 # new column
-dist['hh_to_line'] = 0
+dist_all['hh_to_line'] = 0
 for i in source:
     # location of hh
     hh_loc = treatment_hh[treatment_hh['OBJECTID'] == i]['geometry'].reset_index(drop=True)[0]
@@ -255,11 +268,20 @@ for i in source:
     # distance
     d = hh_loc.distance(p_loc)
     # save in df
-    dist.loc[dist['source']==i,'hh_to_line'] = d
+    dist_all.loc[dist_all['source']==i,'hh_to_line'] = d
 
 # column with total distance from hh to transformer
-dist['total'] = dist['distance']+dist['hh_to_line']  
+# for now only bellman-ford, although they are similar for all except one household
+dist_all['total_bf'] = dist_all['distance_bf']+dist_all['hh_to_line']  
 
 ### could add distance from transformer to line, but should be very small
 
-dist.to_csv(data_transformed/'distances.csv')
+#### now add geometry of hh and transformer
+dist_all['source_loc'] = dist_all.apply(lambda row: treatment_hh.loc[treatment_hh['OBJECTID'] == row.source,'geometry'].reset_index(drop=True)[0], axis =1)
+
+dist_all['target_loc'] = dist_all.apply(lambda row: transformers.loc[transformers['p_id'] == row.target,'geometry'].reset_index(drop=True)[0], axis =1)
+
+## convert distance to km ???
+
+# export to csv
+dist_all.to_csv(data_transformed/'distances.csv')
