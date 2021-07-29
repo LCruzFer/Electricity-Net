@@ -7,6 +7,7 @@ from shapely.geometry import Point
 import itertools 
 import numpy as np
 import networkx as nx
+import math
 
 #*set path 
 wd=Path.cwd()
@@ -276,12 +277,41 @@ dist_all['total_bf'] = dist_all['distance_bf']+dist_all['hh_to_line']
 
 ### could add distance from transformer to line, but should be very small
 
+#*#########################
+#! Final df
+#*#########################
+
 #### now add geometry of hh and transformer
 dist_all['source_loc'] = dist_all.apply(lambda row: treatment_hh.loc[treatment_hh['OBJECTID'] == row.source,'geometry'].reset_index(drop=True)[0], axis =1)
 
 dist_all['target_loc'] = dist_all.apply(lambda row: transformers.loc[transformers['p_id'] == row.target,'geometry'].reset_index(drop=True)[0], axis =1)
 
-## convert distance to km ???
+## convert distance to km 
+# according to https://gis.stackexchange.com/questions/80881/what-is-unit-of-shapely-length-attribute unit is degrees 
+
+def deg_to_km(deg, unit='m'):
+    '''
+    -- function by Lucas --
+    Turn degrees into m using haversine formula.
+    Using formula from here: https://sciencing.com/convert-distances-degrees-meters-7858322.html
+    L=(2*pi*r*A)/360 
+    where r of earth=6371km, A is degrees, L is output length
+    *deg=degrees
+    *unit=choose unit of output to be m or km
+    '''
+    if unit=='m':
+        unit=1000
+    elif unit=='km': 
+        unit=1
+    else: 
+        raise ValueError(f'Unit must be one of m or km.')
+    nom=2*math.pi*deg*6371*unit
+    denom=360
+    
+    return nom/denom
+
+# apply function
+dist_all['total_bf_km'] =  dist_all.apply(lambda row: deg_to_km(row.total_bf,'km'), axis=1)
 
 # export to csv
 dist_all.to_csv(data_transformed/'distances.csv')
