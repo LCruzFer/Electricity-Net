@@ -11,7 +11,6 @@ wd=Path.cwd()
 data_transformed=wd.parent/'data'/'transformed_data'
 data_lines=wd.parent/'data'/'Lines'
 data_fieldwork=wd.parent/'data'/'Kakamega Fieldwork Shapefiles'
-data_transformed=wd.parent/'data'/'transformed_data'
 
 '''
 This file is used to find the intersection points of lines in an electricity network giving each point an ID and line on which they are. One point that is intersection of multiple lines will have ID|geom|(lines it lies on). 
@@ -101,11 +100,11 @@ def to_one_list(row):
 #! DATA
 #*#########################
 #read in lines with transformer numbers - output from lines_transformers_matching.py
-lines=pd.read_csv(data_lines/'lines_w_transformernos.csv')
+lines=pd.read_csv(data_transformed/'lines_w_transformernos.csv')
 lines=lines.drop(['Unnamed: 0', 'Trans_Location', 'point'], axis=1)
 #turn geometry into shapely object from string 
 lines['geometry']=lines['geometry'].apply(wkt.loads)
-lines=lines[lines['Trans_No']==8459]
+#lines=lines[lines['Trans_No']==8459]
 
 #*#########################
 #! INTERSECTIONS
@@ -153,7 +152,7 @@ for line in lines_unique:
 #turn into a df 
 line_df=pd.DataFrame.from_dict(line_point_dict, orient='index')
 line_df['p_id']=line_df.apply(to_one_list, axis=1)
-line_df=line_df.reset_index().rename(columns={'index': 'line_id'}).drop(list(range(0, 7)), axis=1)
+line_df=line_df.reset_index().rename(columns={'index': 'line_id'}).drop(list(range(0, 5)), axis=1)
 
 #!DONE 
 #now write into a CSV 

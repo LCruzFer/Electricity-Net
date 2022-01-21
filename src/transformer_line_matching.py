@@ -1,3 +1,7 @@
+'''
+This file is intended to match the transformer to the closest line and get that point on the line
+'''
+
 from pathlib import Path
 import pandas as pd 
 import geopandas as gpd 
@@ -20,6 +24,8 @@ lines['geometry']=lines['geometry'].apply(wkt.loads)
 transformers=gpd.read_file(data_fieldwork/'Final_Transformers.shp')
 transformers['Trans_No']=transformers['Trans_No'].astype(int)
 transformers['geometry']=[ops.transform(nnt._to_2d, line) for line in transformers['geometry']]
+
+
 
 #*#########################
 #! LINE IDENTIFIER
@@ -52,35 +58,14 @@ lines_w_transnos=lines[['Line_ID', 'geometry', 'point']].merge(nearest_one_df, o
 #write to a csv 
 lines_w_transnos.to_csv(data_transformed/'lines_w_transformernos.csv')
 
-#*#########################
-#! CLOSEST POINT ON LINE
-#*#########################
-#find the closest point to the transformer on the line that is closest to it
-#use the prior results
-#first only keep relevant columns of lines_w_transnos df 
-trans_closest_line=lines_w_transnos[['Trans_No', 'Trans_Location', 'Line_ID', 'geometry']]
-#for each (transformer, line) pair find the nearest point on the line from the transformer
-#!make more pythonic once more internet access
-trans_closest_line['closest_point']=0
-for i in trans_closest_line.index:
-    trans_geom=trans_closest_line.loc[i, 'Trans_Location']
-    line_geom=trans_closest_line.loc[i, 'geometry']
-    closest_point=ops.nearest_points(trans_geom, line_geom)[1]
-    trans_closest_line.loc[i, 'closest_point']=closest_point.wkt
-trans_closest_line['closest_point']=trans_closest_line['closest_point'].apply(wkt.loads)
-#create df with Trans_No and line and corresponding point that are closest to Trans_No, i.e. shortest distance between Trans_Location and closest_point
-trans_closest_line['distance']=[tl.distance(cp) for tl, cp in zip(trans_closest_line['Trans_Location'], trans_closest_line['closest_point'])]
-#for each trans_no find line_id with shortest distance 
-transnos=trans_closest_line['Trans_No'].drop_duplicates()
-shortest_dist={}
-for tn in transnos: 
-    trans=trans_closest_line[trans_closest_line['Trans_No']==tn]
-    closest=trans[trans['distance']==trans['distance'].min()].index
-    shortest_dist[tn]=trans.loc[closest, 'Line_ID'].values
-#!!WARNING: multiple lines are closest to one transformer, for now simply using first one in list which will result in longer distances fro some points !!! (probably only a slgith difference)
-trans_shortest=pd.DataFrame.from_dict(shortest_dist, orient='index').reset_index()
-trans_shortest=trans_shortest.rename(columns={'index': 'Trans_No', 0: 'Line_ID'}).drop([1, 2], axis=1)
-trans_shortest=trans_shortest.merge(trans_closest_line[['Line_ID', 'closest_point']], on='Line_ID')
-#write to csv 
-trans_closest_line.to_csv(data_transformed/'transformer_closest_linepoints.csv')
-trans_shortest.to_csv(data_transformed/'transformer_closest_line.csv')
+
+#*##########################
+#! Matching
+#*##########################
+# use class matching_and_distances from nnt
+trans_matching= nnt.matching_and_distances(transformers, lines, ('Trans_No', 'geometry'), ('Line_ID', 'geometry'))
+# df with point-ID (which is similar to transformer-ID), the closest line and that point
+trans_closest = trans_matching.closest_points_df()
+
+# export dataframe 
+trans_closest.to_csv(data_transformed/'trans_line_closest.csv')
