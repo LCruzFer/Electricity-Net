@@ -30,7 +30,7 @@ def split_line(df, id, geom):
         df = df.rename(columns={"index":"line_n"})
         df.line_n = df.line_n +1
         df["line"] = id +1
-        df["Line_ID"] = df.line.astype(str) + '00'+ df.line_n.astype(str)
+        df["Line_ID"] = df.line.astype(str) + '0'+ df.line_n.astype(str)
         return df
 
 
@@ -129,24 +129,22 @@ def distances_on_line(lines, units, intersections=None, transformers=None, lines
     for line in lines:
         #first need to retrieve all points that are on this line
         points_on_line=units[units['lines']==line]
+        transformer_points=transformers[transformers['lines']==line]
+        points_on_line = points_on_line.append(transformer_points, ignore_index=True)
         if intersections is not None :
             intersection_points=intersections[intersections.apply(lambda x: line in x['lines'], axis = 1)]
-            points_on_line.append(intersection_points, ignore_index=True)
+            points_on_line = points_on_line.append(intersection_points, ignore_index=True)
         if lines_connection is not None:
             p_connections = lines_connection[lines_connection.apply(lambda x: line in x['lines'], axis = 1)]
-            points_on_line.append(p_connections, ignore_index=True)
-        if transformers is not None:
-            transformer_points=transformers[transformers['lines']==line]
-            points_on_line.append(transformer_points, ignore_index=True)
+            points_on_line = points_on_line.append(p_connections, ignore_index=True)   
         # combine to one df
-        points_on_line = points_on_line.drop_duplicates(['geometry'],ignore_index=True) # geometry
+        points_on_line = points_on_line.drop_duplicates(['p_id'],ignore_index=True) # geometry
         # initialize dictionary with point-tuples as key and distance as value        
         line_dist={}
         if len(points_on_line) >= 2:
             geoms=points_on_line['geometry'].tolist()
             for combi in itertools.combinations(geoms, 2):
                 # calculate distance of all combinations
-                #print((combi[0].wkt,combi[1].wkt))
                 dist=combi[0].distance(combi[1])
                 # retrieve point A
                 pointA = points_on_line.loc[points_on_line['geometry']==combi[0], 'p_id'].reset_index(drop=True)[0]
@@ -188,9 +186,6 @@ def dist_st(G,s,t, algorithm='bellman-ford'):
     t: target
     algorithm: default is bellman-ford, alternative is dijkstra
     '''
-    #a = s
-    #b = t
-    #df = points_dist
     # get path points between source and target, weighted by distance
     path = nx.shortest_path(G, source=s, target=t, weight='distance', method=algorithm)
     # initialize distance
@@ -387,7 +382,7 @@ class distances:
         constructing network graph to sum up the distances between household and transformer along the lines
         '''
         hh = self.df_hh
-        #transformers = self.transf_line_match()
+        transformers = self.transf_line_match()
         units = self.hh_line_match()
         distances = self.lines_distances()
         points_dist = distances[['pointA', 'pointB', 'distance']].dropna().reset_index(drop=True)
@@ -425,14 +420,14 @@ class distances:
         dist['total_dist'] = dist['distance'] + dist['hh_to_line']
 
         #### now add geometry of hh and transformer
-        #dist['source_loc'] = dist.apply(lambda row: hh.loc[hh[self.hh_id] == row.source,self.hh_geom].reset_index(drop=True)[0], axis =1)
+        dist['source_loc'] = dist.apply(lambda row: hh.loc[hh[self.hh_id] == row.source,self.hh_geom].reset_index(drop=True)[0], axis =1)
 
-        #dist['target_loc'] = dist.apply(lambda row: transformers.loc[transformers['p_id'] == row.target,'geometry'].reset_index(drop=True)[0], axis =1)
+        dist['target_loc'] = dist.apply(lambda row: transformers.loc[transformers['p_id'] == row.target,'geometry'].reset_index(drop=True)[0], axis =1)
 
         # convert distance to km
-        #dist['total_dist_km'] =  dist.apply(lambda row: deg_to_km(row.total_dist,'km'), axis=1)
+        dist['total_dist_km'] =  dist.apply(lambda row: deg_to_km(row.total_dist,'km'), axis=1)
 
-        #dist = dist.rename(columns={'source': 'household', 'target': 'transformer','source_loc': 'household_loc', 'target_loc': 'transformer_loc'})
+        dist = dist.rename(columns={'source': 'household', 'target': 'transformer','source_loc': 'household_loc', 'target_loc': 'transformer_loc'})
 
         return dist
 
