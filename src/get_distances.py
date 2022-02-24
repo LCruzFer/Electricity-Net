@@ -1,5 +1,6 @@
 from pyparsing import col
 from shapely.geometry.linestring import LineString
+from shapely.geometry import Point
 import pandas as pd
 import nearest_neighbor_tools as nnt
 from shapely import ops, wkt
@@ -29,7 +30,7 @@ def split_line(df, id, geom):
         df = df.rename(columns={"index":"line_n"})
         df.line_n = df.line_n +1
         df["line"] = id +1
-        df["Line_ID"] = df.line.astype(str) + df.line_n.astype(str)
+        df["Line_ID"] = df.line.astype(str) + '00'+ df.line_n.astype(str)
         return df
 
 
@@ -247,18 +248,23 @@ class distances:
         self.tr_geom = cols_tr[1]
         self.lines_geom = lines_geom
         # dataframes
-        self.df_hh = df_hh[[self.hh_id, self.hh_geom, self.hh_tr]].dropna(axis = 0, subset = [self.hh_geom])
-        self.df_hh[self.hh_id] = self.df_hh[self.hh_id].astype(int)
-        self.df_tr[self.tr_id] = self.df_tr[self.tr_id].astype(int)
-        self.df_tr = df_tr[[self.tr_id, self.tr_geom]].dropna(axis=0, subset=[self.tr_geom])
-        self.df_tr[self.tr_id]=self.df_tr[self.tr_id].astype(int)
+        df_hh = df_hh[[self.hh_id, self.hh_geom, self.hh_tr]].dropna(axis = 0, subset = [self.hh_geom])
+        df_hh[self.hh_id] = df_hh[self.hh_id].astype(int)
+        df_tr = df_tr[[self.tr_id, self.tr_geom]].dropna(axis=0, subset=[self.tr_geom])
+        df_tr[self.tr_id]=df_tr[self.tr_id].astype(int)
         #drop third dimension of geometry that contains no info
-        self.df_tr[self.tr_geom]=[ops.transform(nnt._to_2d, line) for line in self.df_tr[self.tr_geom]]
-        self.df_lines = df_lines[[self.lines_geom]].dropna(axis=0, subset = [self.lines_geom])
-        self.df_lines = self.df_lines.explode(ignore_index=True) # MultiLineString to Linestring
-        self.df_lines['geometry']=[ops.transform(nnt._to_2d, line) for line in self.df_lines['geometry']]
-        self.df_lines.reset_index(inplace=True)
-        self.df_lines = self.df_lines.rename(columns={"index":"line_id"})       
+        df_tr[self.tr_geom]=[ops.transform(nnt._to_2d, line) for line in df_tr[self.tr_geom]]
+        df_lines = df_lines[[self.lines_geom]].dropna(axis=0, subset = [self.lines_geom])
+        df_lines = df_lines.explode(ignore_index=True) # MultiLineString to Linestring
+        df_lines[self.lines_geom]=[ops.transform(nnt._to_2d, line) for line in df_lines[self.lines_geom]]
+        df_lines = df_lines.drop_duplicates(self.lines_geom) 
+        df_lines.reset_index(inplace=True)
+        df_lines = df_lines.rename(columns={"index":"line_id"})  
+        #
+        self.df_hh = df_hh
+        self.df_tr = df_tr
+        self.df_lines = df_lines
+
 
     def lines_splitting(self):
         '''
@@ -325,20 +331,54 @@ class distances:
 
     def lines_connections(self):
         '''
-        construct connection lines
+        construct connection lines, i.e. collect start and endpoint of a line and find closest point to another line
         '''
-        return None
+        lines_points = self.lines_splitting()[['Line_ID', 'geometry']]
+        # get start and endpoints
+        lines_points['startpoint'] = lines_points.apply(lambda row: str(199) + str(row.Line_ID), axis=1)
+        lines_points['endpoint'] = lines_points.apply(lambda row: str(299) + str(row.Line_ID), axis=1)
+        lines_points['start_geom'] = lines_points.apply(lambda row: Point(row.geometry.coords[0]), axis = 1)
+        lines_points['end_geom'] = lines_points.apply(lambda row: Point(row.geometry.coords[-1]), axis = 1)
+        
+        # df with all points in lines
+        lines_start = lines_points[['Line_ID', 'startpoint', 'start_geom']].rename(columns={'startpoint':'p_id', 'start_geom':'geometry'})
+        lines_end = lines_points[['Line_ID', 'endpoint', 'end_geom']].rename(columns={'endpoint':'p_id', 'end_geom':'geometry'})
+        lines_points = lines_start.append(lines_end, ignore_index=True)
+        
+        # find closest point which is not on same line
+        lines_points['closest'] = lines_points.apply(lambda row: nnt.get_closest_id(row.geometry, lines_points[lines_points.Line_ID != row.Line_ID], ('p_id', 'geometry')), axis = 1)
+        
+        lines_points['geom_closest'] = lines_points.apply(lambda row: lines_points.loc[lines_points.p_id == row.closest, 'geometry'].reset_index(drop=True)[0], axis = 1)
+        
+        # construct new line with LINESTRING and new ID
+        lines_points['line_geom'] = lines_points.apply(lambda row: LineString([row.geometry, row.geom_closest]), axis=1)
+        lines_points['new_line_id'] = lines_points.apply(lambda row: str(999) + str(row.Line_ID), axis =1).astype(int)
+        
+        # add list of lines where point lies on
+        lines_points['lines'] = lines_points.apply(lambda row: lines_points.loc[(lines_points.closest == row.p_id) | (lines_points.p_id == row.p_id), 'new_line_id'].drop_duplicates().tolist(), axis = 1)
+        
+        lines_points.apply(lambda row: row.lines.append(row.Line_ID), axis=1)
+        
+        lines_connection = lines_points[['p_id', 'geometry', 'lines']]
+        lines_connection['p_id'] = lines_connection['p_id'].astype(int)
+        lines_connection['geometry'] = gpd.GeoSeries(lines_connection['geometry'])
+        
+        return lines_connection
         
     def lines_distances(self):
         '''
         calculate distances between points on the same line
         '''
         lines = self.lines_splitting()['Line_ID'].tolist()
+        lines_connection = self.lines_connections()
+        # need to extract all lines in lines_connection
+        for x in lines_connection.lines.explode().drop_duplicates().tolist():
+            if x not in lines:
+                lines.append(x)
         units = self.hh_line_match()
         intersections = self.line_intersections()
-        connections = self.lines_connections()
         transformers = self.transf_line_match()
-        distances = distances_on_line(lines=lines, units=units, intersections=intersections, transformers=transformers, lines_connection=connections)
+        distances = distances_on_line(lines=lines, units=units, intersections=intersections, transformers=transformers, lines_connection=lines_connection)
         return distances
         
 
@@ -347,7 +387,7 @@ class distances:
         constructing network graph to sum up the distances between household and transformer along the lines
         '''
         hh = self.df_hh
-        transformers = self.transf_line_match()
+        #transformers = self.transf_line_match()
         units = self.hh_line_match()
         distances = self.lines_distances()
         points_dist = distances[['pointA', 'pointB', 'distance']].dropna().reset_index(drop=True)
@@ -365,7 +405,7 @@ class distances:
         # use dist_st to get all distances from source to target in G
         for s in source:
             # extract corresponding transformer number from HH-ID
-            t = hh[hh[self.hh_id]==s][self.hh_tr].reset_index(drop=True)[0]
+            t = hh.loc[hh[self.hh_id]==s,self.hh_tr].reset_index(drop=True)[0]
             if (t in G.nodes()) and (s in G.nodes()) and (nx.has_path(G,s,t)):
                 df = dist_st(G=G, s=s, t=t, algorithm = algorithm)
                 dist = dist.append(df, ignore_index=True)
@@ -374,9 +414,9 @@ class distances:
         dist['hh_to_line'] = 0
         for i in source:
             # location of hh
-            hh_loc = hh[hh[self.hh_id] == i][self.hh_geom].reset_index(drop=True)[0]
+            hh_loc = hh.loc[hh[self.hh_id] == i,self.hh_geom].reset_index(drop=True)[0]
             # location on line
-            p_loc = units[units['p_id']==i]['geometry'].reset_index(drop=True)[0]
+            p_loc = units.loc[units['p_id']==i,'geometry'].reset_index(drop=True)[0]
             # distance
             d = hh_loc.distance(p_loc)
             # save in df
@@ -390,9 +430,9 @@ class distances:
         #dist['target_loc'] = dist.apply(lambda row: transformers.loc[transformers['p_id'] == row.target,'geometry'].reset_index(drop=True)[0], axis =1)
 
         # convert distance to km
-        dist['total_dist_km'] =  dist.apply(lambda row: deg_to_km(row.total_dist,'km'), axis=1)
+        #dist['total_dist_km'] =  dist.apply(lambda row: deg_to_km(row.total_dist,'km'), axis=1)
 
-        dist = dist.rename(columns={'source': 'household', 'target': 'transformer','source_loc': 'household_loc', 'target_loc': 'transformer_loc'})
+        #dist = dist.rename(columns={'source': 'household', 'target': 'transformer','source_loc': 'household_loc', 'target_loc': 'transformer_loc'})
 
         return dist
 
