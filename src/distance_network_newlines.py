@@ -1,22 +1,20 @@
-from pathlib import Path
 import pandas as pd 
 import geopandas as gpd
 from shapely import ops, wkt 
 import networkx as nx
-from shapely.geometry import Point
 import itertools 
 import numpy as np
 import networkx as nx
 import math
+from zipfile import ZipFile
 
-from shapely.geometry.linestring import LineString
 import nearest_neighbor_tools as nnt
-
-#*set path 
-wd=Path.cwd()
-data_transformed=wd.parent/'data'/'transformed_data'
-data_lines=wd.parent/'data'/'Lines'
-data_fieldwork=wd.parent/'data'/'Kakamega Fieldwork Shapefiles'
+from main import  hh_treat_shp, distances_csv
+from transformer_line_matching import trans_closest
+#from line_splitting import lines_all
+from household_line_matching import closest_points
+from line_intersections import point_df
+from lines_connections import lines_list, lines_connection
 
 '''
 This file uses a network graph to find the distance from a household to the transformer. First, the distance between points laying on the same line are calculated. Then, a weighted network graph is constructed to find the shortest path. Finally, the distance between a household to the point on line is added.
@@ -80,7 +78,7 @@ def distances_on_line(lines, units, intersections, transformers, lines_connectio
     # empty final dataframe
     distances = pd.DataFrame(columns=['line', 'points', 'distance', 'pointA', 'pointB', 'geometry_A', 'geometry_B'])
     for line in lines:
-        #line=52201
+        #line=821
         #first need to retrieve all points that are on this line
         unit_points=units[units['lines']==line]
         intersection_points=intersections[intersections.apply(lambda x: line in x['lines'], axis = 1)]
@@ -178,13 +176,16 @@ def deg_to_km(deg, unit='m'):
 #*#########################
 
 #household data 
-units=pd.read_csv(data_transformed/'closest_points_on_lines.csv')
-units=prep_data(units, ['closest_point'])
+#units=pd.read_csv(data_transformed/'closest_points_on_lines.csv')
+
+units = closest_points
 units=units.rename(columns = {units.columns[1]:'geometry'})
+units=prep_data(units, ['geometry'])
 #intersection points 
-intersections=pd.read_csv(data_transformed/'intersection_points.csv')
-intersections=prep_data(intersections, ['geometry'])
-intersections=str_to_list(intersections,'lines')
+#intersections=pd.read_csv(data_transformed/'intersection_points.csv')
+#intersections=prep_data(intersections, ['geometry'])
+#intersections=str_to_list(intersections,'lines')
+intersections = point_df
 
 '''
 #read in line_id|(p_ids of points on line) df 
@@ -197,46 +198,18 @@ lineid_pid=lineid_pid.rename(columns={'line_id': 'lines'})
 '''
 
 #transformer
-transformers=pd.read_csv(data_transformed/'trans_line_closest.csv')
-transformers=prep_data(transformers, ['closest_point'])
+#transformers=pd.read_csv(data_transformed/'trans_line_closest.csv')
+transformers = trans_closest
 transformers=transformers.rename(columns={'closest_point':'geometry'})
+transformers=prep_data(transformers, ['geometry'])
 
 #*treatment households
-treatment_hh=gpd.read_file(data_fieldwork/'Treatment_Households.shp')
+treatment_hh=gpd.read_file(hh_treat_shp)
 
 
 # lines
-lines=pd.read_csv(data_transformed/'lines_all_split.csv')
-lines = prep_data(lines, ['geometry'])
-
-########## need to construct connection lines
-# get start and endpoints
-lines_points = lines[['Line_ID', 'geometry']]
-lines_points['startpoint'] = lines_points.apply(lambda row: str(199) + str(row.Line_ID), axis=1)
-lines_points['endpoint'] = lines_points.apply(lambda row: str(299) + str(row.Line_ID), axis=1)
-lines_points['start_geom'] = lines_points.apply(lambda row: row.geometry.boundary[0], axis = 1)
-lines_points['end_geom'] = lines_points.apply(lambda row: row.geometry.boundary[1], axis = 1)
-
-# df with all points in lines
-lines_start = lines_points[['Line_ID', 'startpoint', 'start_geom']].rename(columns={'startpoint':'p_id', 'start_geom':'geometry'})
-lines_end = lines_points[['Line_ID', 'endpoint', 'end_geom']].rename(columns={'endpoint':'p_id', 'end_geom':'geometry'})
-lines_points = lines_start.append(lines_end, ignore_index=True)
-
-# find closest point which is not on same line
-lines_points['closest'] = lines_points.apply(lambda row: nnt.get_closest_id(row.geometry, lines_points[lines_points.Line_ID != row.Line_ID], ('p_id', 'geometry')), axis = 1)
-
-lines_points['geom_closest'] = lines_points.apply(lambda row: lines_points.loc[lines_points.p_id == row.closest, 'geometry'].reset_index(drop=True)[0], axis = 1)
-
-# construct new line with LINESTRING and new ID
-lines_points['line_geom'] = lines_points.apply(lambda row: LineString([row.geometry, row.geom_closest]), axis=1)
-lines_points['new_line_id'] = lines_points.apply(lambda row: str(999) + str(row.Line_ID), axis =1).astype(int)
-
-# add list of lines where point lies on
-lines_points['lines'] = lines_points.apply(lambda row: lines_points.loc[(lines_points.closest == row.p_id) | (lines_points.p_id == row.p_id), 'new_line_id'].drop_duplicates().tolist(), axis = 1)
-lines_points.apply(lambda row: row.lines.append(row.Line_ID), axis=1)
-
-lines_connection = lines_points[['p_id', 'geometry', 'lines']]
-lines_connection['p_id'] = lines_connection['p_id'].astype(int)
+#lines=pd.read_csv(data_transformed/'lines_all_split.csv')
+#lines = prep_data(lines, ['geometry'])
 
 #*#########################
 #! DISTANCES
@@ -245,15 +218,8 @@ lines_connection['p_id'] = lines_connection['p_id'].astype(int)
 In this section the distances between points on the same line are calculated.
 '''
 
-
 # use function distances_on_line
-lines_list=lines['Line_ID'].drop_duplicates().tolist()
-# need to extract all lienes in lines_connection
-for x in lines_connection.lines.explode().drop_duplicates().tolist():
-    if x not in lines_list:
-        lines_list.append(x)
 
-#lines_list.append(lines_connection.lines.explode().drop_duplicates().tolist())
 distances = distances_on_line(lines=lines_list, units=units, intersections=intersections, transformers=transformers, lines_connection=lines_connection)
 distances[~(distances.distance.isnull())]
 # lines with nan
@@ -261,45 +227,6 @@ no_distances=distances[distances.distance.isnull()]
 # 
 len(no_distances)
 
-#########################
-# need to construct distances for unconnected lines
-
-'''
-# get start and end point of lines with no distance
-no_distances['line_geometry'] = no_distances.apply(lambda row: lines.geometry[lines.Line_ID == row.line].reset_index(drop=True)[0], axis =1)
-no_distances['line_startpoint'] = no_distances.apply(lambda row: row.line_geometry.boundary[0], axis = 1)
-no_distances['line_endpoint'] = no_distances.apply(lambda row: row.line_geometry.boundary[1], axis = 1)
-
-# make points df with all points which are connected
-points = distances[['pointA', 'geometry_A']].rename(columns={'pointA':'point', 'geometry_A':'geometry'}).dropna()
-points = points.append(distances[['pointB', 'geometry_B']].rename(columns={'pointB':'point', 'geometry_B':'geometry'}).dropna()).reset_index(drop=True)
-
-# df of start and end points of unconnected lines
-new_lines = no_distances[['line', 'line_startpoint']].rename(columns={'line_startpoint': 'geometryA'})
-new_lines['line'] = new_lines.apply(lambda row: str(row.line) + str(1), axis=1)
-linesB = no_distances[['line', 'line_endpoint']].rename(columns={'line_endpoint': 'geometryA'})
-linesB['line'] = linesB.apply(lambda row: str(row.line) + str(2), axis=1)
-# get distances of points on same line
-same_lines = new_lines.copy()
-same_lines = same_lines.rename(columns = {'line':'pointA'})
-#same_lines['pointA'] = same_lines['pointA'].astype(int)
-same_lines['pointB'] = linesB['line']
-same_lines['geometryB'] = linesB['geometryA'] 
-
-
-# find the closest points of all connected points
-new_lines = new_lines.append(linesB).rename(columns = {'line':'pointA'}).reset_index(drop=True)
-#new_lines['pointA'] = new_lines['pointA'].astype(int)
-new_lines['pointB'] = new_lines.apply(lambda row: nnt.get_closest_id(row.geometryA, points, ('point', 'geometry')), axis = 1)
-# get geometry of closest point
-new_lines['geometryB'] = new_lines.apply(lambda row: points.loc[points.point == row.pointB, 'geometry'].reset_index(drop=True)[0], axis=1)
-
-# add points on same line
-new_lines = new_lines.append(same_lines).reset_index(drop=True)
-
-# get distance between points
-new_lines['distance'] = new_lines.apply(lambda row: row.geometryA.distance(row.geometryB), axis=1)
-'''
 
 #*#########################
 #! Network Graph
@@ -309,8 +236,6 @@ In this section the network graph is constructed to sum up the distances between
 '''
 
 points_dist = distances[['pointA', 'pointB', 'distance']].dropna().reset_index(drop=True)
-# append new constructed points-distance
-#points_dist = points_dist.append(new_lines[['pointA', 'pointB', 'distance']]).drop_duplicates().reset_index(drop=True)
 
 # initialize network graph
 G = nx.Graph()
@@ -401,5 +326,7 @@ dist_all['target_loc'] = dist_all.apply(lambda row: transformers.loc[transformer
 # apply function
 dist_all['total_bf_km'] =  dist_all.apply(lambda row: deg_to_km(row.total_bf,'km'), axis=1)
 
+dist_all = dist_all.rename(columns={'source': 'household', 'target': 'transformer'})
+
 # export to csv
-dist_all.to_csv(data_transformed/'distances.csv')
+dist_all.to_csv(distances_csv)
