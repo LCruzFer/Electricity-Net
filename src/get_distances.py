@@ -122,8 +122,6 @@ def distances_on_line(lines, units, intersections=None, transformers=None, lines
 
     returns a df with the line, the corresponding distances of two points on this line, including the geometry of the points
     '''
-    #for a given line
-    #lines=transformer['lines'].drop_duplicates()
     # empty final dataframe
     distances = pd.DataFrame(columns=['line', 'points', 'distance', 'pointA', 'pointB', 'geometry_A', 'geometry_B'])
     for line in lines:
@@ -138,7 +136,7 @@ def distances_on_line(lines, units, intersections=None, transformers=None, lines
             p_connections = lines_connection[lines_connection.apply(lambda x: line in x['lines'], axis = 1)]
             points_on_line = points_on_line.append(p_connections, ignore_index=True)   
         # combine to one df
-        points_on_line = points_on_line.drop_duplicates(['p_id'],ignore_index=True) # geometry
+        points_on_line = points_on_line.drop_duplicates(['p_id'],ignore_index=True)
         # initialize dictionary with point-tuples as key and distance as value        
         line_dist={}
         if len(points_on_line) >= 2:
@@ -357,7 +355,6 @@ class distances:
         lines_connection = lines_points[['p_id', 'geometry', 'lines']]
         lines_connection['p_id'] = lines_connection['p_id'].astype(int)
         lines_connection['geometry'] = gpd.GeoSeries(lines_connection['geometry'])
-        
         return lines_connection
         
     def lines_distances(self):
@@ -367,9 +364,10 @@ class distances:
         lines = self.lines_splitting()['Line_ID'].tolist()
         lines_connection = self.lines_connections()
         # need to extract all lines in lines_connection
-        for x in lines_connection.lines.explode().drop_duplicates().tolist():
-            if x not in lines:
-                lines.append(x)
+        if lines_connection is not None:
+            for x in lines_connection.lines.explode().drop_duplicates().tolist():
+                if x not in lines:
+                    lines.append(x)
         units = self.hh_line_match()
         intersections = self.line_intersections()
         transformers = self.transf_line_match()
